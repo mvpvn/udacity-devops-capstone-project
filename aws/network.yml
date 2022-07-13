@@ -177,14 +177,7 @@ Resources:
         Properties:
             RouteTableId: !Ref PrivateRouteTable2
             SubnetId: !Ref PrivateSubnet2
-#    PublicInternetRoute:
-#        Type: AWS::EC2::Route
-#        Properties:
-#            RouteTableId:
-#                Ref: PublicRouteTable
-#            DestinationCidrBlock: 0.0.0.0/0
-#            GatewayId:
-#                Ref: InternetGateway
+
     PrivateInternetOutboundRoute1:
         Type: AWS::EC2::Route
         Properties:
