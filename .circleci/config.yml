@@ -1,0 +1,82 @@
+version: 2.1
+
+jobs:
+  lint:
+    docker:
+      - image: hadolint/hadolint:latest-debian
+    steps:
+      - checkout
+      - run:
+          name: Lint Dockerfile
+          command: hadolint Dockerfile
+
+  build:
+    docker:
+      - image: docker:20.10.16-git
+    steps:
+      - checkout
+      - setup_remote_docker
+      - run:
+          name: Build application Docker image
+          command: |
+            docker build --build-arg BUILD_ID=${CIRCLE_WORKFLOW_ID:0:7} -t site .
+            docker save -o site.tar site
+      - persist_to_workspace:
+          root: .
+          paths:
+            - site.tar
+
+  publish:
+    docker:
+      - image: docker:20.10.16-git
+    steps:
+      - checkout
+      - setup_remote_docker
+      - attach_workspace:
+          at: .
+      - run:
+          name: Tag docker image
+          command: |
+            echo $DOCKERHUB_PASSWORD | docker login -u $DOCKERHUB_LOGIN --password-stdin
+            docker load -i site.tar
+            docker tag site "$DOCKERHUB_LOGIN/$CIRCLE_PROJECT_REPONAME:${CIRCLE_WORKFLOW_ID:0:7}"
+            docker tag site "$DOCKERHUB_LOGIN/$CIRCLE_PROJECT_REPONAME:latest"
+            docker push "$DOCKERHUB_LOGIN/$CIRCLE_PROJECT_REPONAME:${CIRCLE_WORKFLOW_ID:0:7}"
+            docker push "$DOCKERHUB_LOGIN/$CIRCLE_PROJECT_REPONAME:latest"
+
+  deploy:
+    docker:
+      - image: amazon/aws-cli
+    steps:
+      - checkout
+      - run:
+          name: Install dependencies
+          command: |
+            curl -o kubectl https://s3.us-west-2.amazonaws.com/amazon-eks/1.22.6/2022-03-09/bin/linux/amd64/kubectl
+            install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl
+      - run:
+          name: Deploy new version
+          command: |
+            aws eks update-kubeconfig --name capstone
+            echo "Deploying to cluster"
+            if kubectl get deployment site; then
+              echo "Updating deployment to ${CIRCLE_WORKFLOW_ID:0:7}"
+              kubectl set image deployment/site site="$DOCKERHUB_LOGIN/$CIRCLE_PROJECT_REPONAME:${CIRCLE_WORKFLOW_ID:0:7}"
+            else
+              echo "Creating deployment"
+              kubectl apply -f ./kubernetes
+            fi
+
+workflows:
+  default:
+    jobs:
+      - lint
+      - build:
+          requires:
+            - lint
+      - publish:
+          requires:
+            - build
+      - deploy:
+          requires:
+            - publish
